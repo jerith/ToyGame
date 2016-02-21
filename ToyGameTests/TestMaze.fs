@@ -5,59 +5,98 @@ open FsCheck
 open FsCheck.NUnit
 open ToyGame
 
+type MazeSize = MazeSize of int*int
+type MazeSizeWithTwoCells = MazeSizeWithTwoCells of (int*int)*(int*int)*(int*int)
 
-let forallCells maze f cells =
-    Seq.forall (fun cell -> f (Maze.getCell maze cell)) cells
+let isqrt = float >> sqrt >> int
+
+let genSize = Gen.sized <| fun s -> Gen.choose (2, isqrt s + 2)
+
+let genCell (w, h) =
+    Gen.map2 (fun a b -> (a, b)) (Gen.choose (0, w-1)) (Gen.choose (0, h-1))
+
+type MazeGenerators =
+    static member MazeSize = Arb.fromGen (Gen.map MazeSize (Gen.two genSize))
+    static member MazeSizeWithTwoCells = Arb.fromGen (gen {
+        let! MazeSize (w, h) = Arb.generate<MazeSize>
+        let! c1 = genCell (w, h)
+        let! c2 = genCell (w, h)
+        return MazeSizeWithTwoCells ((w, h), c1, c2)
+    })
 
 
-let checkShape w h (maze:Maze.T) =
-    "width"  @| (maze.width = w) .&.
-    "height" @| (maze.height = h) .&.
-    "count"  @| (Map.toList maze.cells |> List.length = ((w+2) * (h+2)))
+let adjListIsValid maze cell =
+    let adj = Maze.adj maze cell
+    "adj cells unique"   @| (Set.count <| Set.ofList adj = List.length adj) .&.
+    "adj cells touching" @| (List.forall (Maze.cellsAdjacent cell) adj)
+
+let cellIsValid (maze:Maze.T) (x, y) =
+    let w, h = maze.width, maze.height
+    sprintf "cell (%d, %d)" x y @| [
+        "cell within bounds" @| (x >= 0 && x < w && y >= 0 && y < h)
+        "adj cells valid"    @| (adjListIsValid maze (x, y))]
+
+let checkCellsValid (maze:Maze.T) =
+    let cells = Map.toList maze.adj |> List.map (fun (c, _) -> c)
+    "cells valid"       @| [for c in cells -> cellIsValid maze c] .&.
+    "all cells present" @| (maze.width * maze.height = List.length cells)
 
 
-[<Property>]
-let testEmptyMaze (PositiveInt w, PositiveInt h) =
+let cornerCells w h = [0, 0; w-1, 0; 0, h-1; w-1, h-1]
+
+let edgeCells w h = seq {
+    yield! [for x in 1..w-2 do yield x, 0; yield x, h-1]
+    yield! [for y in 1..h-2 do yield 0, y; yield w-1, y]}
+
+let insideCells w h = seq {
+    for x in 1..w-2 do for y in 1..h-2 do yield (x, y)}
+
+
+[<Property(Arbitrary=[|typeof<MazeGenerators>|])>]
+let testEmptyMaze (MazeSize (w, h)) =
     let m = Maze.empty w h
-    "empty maze has only Empty/Border cells" @| [
-        "shape"  @| (checkShape w h m)
-        "cells"  @| (forallCells m ((=) Maze.Empty) (Maze.cells m))
-        "border" @| (forallCells m ((=) Maze.Border) (Maze.border m))]
+    let adjCount' n cell = (Maze.adj m cell |> List.length) = n
+    let adjCount n cells = Seq.forall (adjCount' n) cells
+    "empty maze has all cells connected to their neighbours" @| [
+        "maze valid" @| (checkCellsValid m)
+        "all adj cells present" @| [
+            "corner" @| (cornerCells w h |> adjCount 2)
+            "edge"   @| (edgeCells w h |> adjCount 3)
+            "inside" @| (insideCells w h |> adjCount 4)]]
 
 
-let xIn xs (x, _) = Seq.contains x xs
-let yIn ys (_, y) = Seq.contains y ys
-
-let isBorderCell w h cell =
-    (xIn (seq {0..w+1}) cell && yIn [0; h+1] cell) ||
-    (xIn [0; w+1] cell && yIn (seq {0..h+1}) cell)
+[<Property(Arbitrary=[|typeof<MazeGenerators>|])>]
+let testEmptyMazePath (MazeSizeWithTwoCells ((w, h), c1, c2)) =
+    Maze.checkPath (Maze.empty w h) c1 c2
 
 
-[<Property>]
-let testCells (PositiveInt w, PositiveInt h) =
-    let cells = Maze.empty w h |> Maze.cells |> Set.ofSeq
-    let xs = seq { 1..w } |> Set.ofSeq
-    let ys = seq { 1..h } |> Set.ofSeq
-    "Maze.cells returns a seq of all non-border cells" @| [
-        "count"  @| (Set.count cells = w * h)
-        "x vals" @| (cells |> Set.forall (xIn <| seq { 1..w }))
-        "y vals" @| (cells |> Set.forall (yIn <| seq { 1..h }))]
+let assertPath w h c1 c2 walls result =
+    not result
 
 
-[<Property>]
-let testBorder (PositiveInt w, PositiveInt h) =
-    let cells = Maze.empty w h |> Maze.border |> Set.ofSeq
-    "Maze.border returns a seq of all border cells" @| [
-        "count" @| (Set.count cells = 2 * (w + h + 2))
-        "vals"  @| (cells |> Set.forall (isBorderCell w h))]
+[<Test>]
+let testPathExamples001()  =
+    let maze = Maze.load 1 1 []
+    Assert.That(Maze.checkPath maze (0, 0) (0, 0))
+
+[<Test>]
+let testPathExamples002()  =
+    let maze = Maze.load 2 1 []
+    Assert.That(not (Maze.checkPath maze (0, 0) (1, 0)))
+
+[<Test>]
+let testPathExamples003()  =
+    let maze = Maze.load 2 1 [(0, 0), (1, 0)]
+    Assert.That(Maze.checkPath maze (0, 0) (1, 0))
 
 
-[<TestCase(0,0, 0,0, Result=false, Description="border to itself")>]
-[<TestCase(0,0, 0,1, Result=false, Description="border to border")>]
-[<TestCase(0,1, 1,1, Result=false, Description="border to adjacent empty")>]
-[<TestCase(1,1, 0,1, Result=false, Description="empty to adjacent border")>]
-[<TestCase(1,1, 1,1, Result=true, Description="empty to itself")>]
-[<TestCase(1,1, 2,1, Result=true, Description="empty to adjacent empty")>]
-let testPathExamples x1 y1 x2 y2 =
-    let maze = Maze.empty 2 1
-    Maze.checkPath (x1, y1) (x2, y2) maze
+
+// [<TestCase(0,0, 0,0, Result=false, Description="border to itself")>]
+// [<TestCase(0,0, 0,1, Result=false, Description="border to border")>]
+// [<TestCase(0,1, 1,1, Result=false, Description="border to adjacent empty")>]
+// [<TestCase(1,1, 0,1, Result=false, Description="empty to adjacent border")>]
+// [<TestCase(1,1, 1,1, Result=true, Description="empty to itself")>]
+// [<TestCase(1,1, 2,1, Result=true, Description="empty to adjacent empty")>]
+// let testPathExamples x1 y1 x2 y2 =
+//     let maze = Maze.empty 2 1
+//     Maze.checkPath (x1, y1) (x2, y2) maze
