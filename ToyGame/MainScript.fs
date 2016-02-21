@@ -16,4 +16,5 @@ type SimpleScript() =
 
      member this.Start() =
         // Spawn the number of cubes specified in the Inspector pane
-        [1..numCubes] |> List.map (fun x -> float32 x * 1.5f) |> List.iter SimpleScript.spawnCube
+        [1..numCubes] |> List.map (fun x -> float32 x * 1.5f)
+        |> List.iter SimpleScript.spawnCube

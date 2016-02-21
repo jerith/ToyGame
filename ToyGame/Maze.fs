@@ -4,7 +4,7 @@
 type T = {
     width : int
     height : int
-    adj : Map<int*int, (int*int) list>
+    adj : Map<int*int, Set<int*int>>
 }
 
 
@@ -13,71 +13,85 @@ let cells w h =
           for y in 0..h-1 do
           yield (x, y) }
 
-
-let adj maze cell = Map.find cell maze.adj
-
-let adjacentCells w h (x, y) = seq {
+let allowedBridges w h (x, y) = seq {
     if y > 0 then yield (x, y-1)
     if x > 0 then yield (x-1, y)
     if x < w-1 then yield (x+1, y)
-    if y < h-1 then yield (x, y+1) } |> List.ofSeq
+    if y < h-1 then yield (x, y+1) } |> Set.ofSeq
+
+let collectEdge edges = function
+    | (c1, c2) when Set.contains (c2, c1) edges -> edges
+    | edge -> Set.add edge edges
+
+let edges w h = Seq.fold collectEdge Set.empty <| seq {
+    for c in cells w h do
+    yield! Seq.map (fun x -> (c, x)) (allowedBridges w h c) }
+
+let validBridge maze (c1, c2) =
+    allowedBridges maze.width maze.height c1 |> Set.contains c2
+
+let adj maze cell = Map.find cell maze.adj
+
+let empty w h =
+    { width = w; height = h;
+      adj = cells w h |> Seq.map (fun x -> (x, Set.empty)) |> Map.ofSeq }
 
 
-let empty w h = {
-    width = w
-    height = h
-    adj = cells w h |> Seq.map (fun c -> (c, adjacentCells w h c)) |> Map.ofSeq
-    }
+let addBridge maze (c1, c2) =
+    let addBridge' c1 c2 = Map.add c1 (Map.find c1 maze.adj |> Set.add c2)
+    { maze with adj = maze.adj |> addBridge' c1 c2 |> addBridge' c2 c1 }
 
+let getBridges maze =
+    let cellBridges bs (c, adj) = Set.fold collectEdge bs adj
+    Map.toSeq maze.adj |> Seq.fold cellBridges Set.empty
 
-let cellsAdjacent (x1, y1) (x2, y2) =
-    abs (x1 - x2) + abs (y1 - y2) = 1
+let getWalls maze =
+    let cellWalls ws (c, adj) =
+        allowedBridges maze.width maze.height c
+        |> Seq.filter (fun c2 -> not <| Set.contains c2 adj)
+        |> Seq.fold collectEdge ws
+    Map.toSeq maze.adj |> Seq.fold cellWalls Set.empty
 
+let create w h bridges =
+    Seq.fold addBridge (empty w h) bridges
 
-let assertValidAdj adjmap c1 c2 =
-    if not (cellsAdjacent c1 c2) then
-        failwith <| sprintf "%s and %s are not adjacent" (string c1) (string c2)
-    if not (Map.containsKey c1 adjmap) then
-        failwith <| sprintf "%s is not a valid cell" (string c1)
-    if not (Map.containsKey c2 adjmap) then
-        failwith <| sprintf "%s is not a valid cell" (string c2)
-
-let addAdj adjmap c1 c2 =
-    let c1v = c2 :: (Map.find c1 adjmap) |> Seq.distinct |> List.ofSeq
-    let c2v = c1 :: (Map.find c2 adjmap) |> Seq.distinct |> List.ofSeq
-    adjmap |> Map.add c1 c1v |> Map.add c2 c2v
-
-let delAdj adjmap c1 c2 =
-    let c1v = Map.find c1 adjmap |> List.filter ((=) c2)
-    let c2v = Map.find c2 adjmap |> List.filter ((=) c1)
-    adjmap |> Map.add c1 c1v |> Map.add c2 c2v
-
-
-let addWall maze (c1, c2) = { maze with adj = delAdj maze.adj c1 c2 }
+let fullyOpen w h = create w h <| edges w h
 
 
 
-let rec buildAdjFromList adjmap = function
-    | [] -> adjmap
-    | (c1, c2) :: adjlist ->
-        assertValidAdj adjmap c1 c2
-        buildAdjFromList (addAdj adjmap c1 c2) adjlist
+// let checkPath maze cell1 cell2 =
+//     let rec checkPath' seen = function
+//         | cell when cell = cell2 -> true
+//         | cell -> adj maze cell |> Seq.filter (notIn seen) |>
+//                   Seq.exists (checkPath' (Set.add cell seen))
+//     checkPath' Set.empty cell1
 
 
-let load w h adjlist =
-    let adjmap = cells w h |> Seq.map (fun a -> (a, [])) |> Map.ofSeq
-    {
-        width = w
-        height = h
-        adj = buildAdjFromList adjmap adjlist
-    }
+module PQ =
+    let empty = Set.empty
+    let isEmpty = Set.isEmpty
 
+    let singleton = Set.singleton
 
-let notIn set item = not <| Set.contains item set
+    let min pq = Set.minElement pq |> snd
+    let max pq = Set.maxElement pq |> snd
+
+    let rm item pq = Set.filter (fun (_, a) -> a <> item) pq
+    let add (cost, item) pq = Set.add (cost, item) pq
+    let adds citems pq = Seq.fold (fun pq citem -> add citem pq) pq citems
+
 
 let checkPath maze cell1 cell2 =
+    let dist (x1, y1) (x2, y2) = (abs (x1 - x2)) + (abs (y1 - y2))
+    let withdist = Seq.map (fun c -> dist c cell2, c)
+    let notIn set = Seq.filter (fun c -> not <| Set.contains c set)
     let rec checkPath' seen = function
-        | cell when cell = cell2 -> true
-        | cell -> adj maze cell |> Seq.filter (notIn seen) |>
-                  Seq.exists (checkPath' (Set.add cell seen))
-    checkPath' Set.empty cell1
+        | cells when PQ.isEmpty cells -> false
+        | cells ->
+            match PQ.min cells with
+                | cell when cell = cell2 -> true
+                | cell ->
+                    cells |> PQ.rm cell
+                    |> PQ.adds (adj maze cell |> notIn seen |> withdist)
+                    |> checkPath' (Set.add cell seen)
+    checkPath' Set.empty (PQ.singleton (dist cell1 cell2, cell1))

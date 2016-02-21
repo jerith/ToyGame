@@ -6,29 +6,66 @@ open FsCheck.NUnit
 open ToyGame
 
 type MazeSize = MazeSize of int*int
-type MazeSizeWithTwoCells = MazeSizeWithTwoCells of (int*int)*(int*int)*(int*int)
+type Maze = Maze of Maze.T
+type FullyOpenMaze = FullyOpenMaze of Maze.T
+type FullyClosedMaze = FullyClosedMaze of Maze.T
+type OpenMazeWithPath = OpenMazeWithPath of Maze.T*(int*int)*(int*int)
+type ClosedMazeWithPath = ClosedMazeWithPath of Maze.T*(int*int)*(int*int)
 
-let isqrt = float >> sqrt >> int
 
-let genSize = Gen.sized <| fun s -> Gen.choose (2, isqrt s + 2)
+module MazeGen =
 
-let genCell (w, h) =
-    Gen.map2 (fun a b -> (a, b)) (Gen.choose (0, w-1)) (Gen.choose (0, h-1))
+    let isqrt = float >> sqrt >> int
 
-type MazeGenerators =
-    static member MazeSize = Arb.fromGen (Gen.map MazeSize (Gen.two genSize))
-    static member MazeSizeWithTwoCells = Arb.fromGen (gen {
-        let! MazeSize (w, h) = Arb.generate<MazeSize>
-        let! c1 = genCell (w, h)
-        let! c2 = genCell (w, h)
-        return MazeSizeWithTwoCells ((w, h), c1, c2)
-    })
+    let genSize = Gen.sized <| fun s -> Gen.choose (2, isqrt s + 2)
 
+    let genCell (maze: Maze.T) =
+        let w, h = maze.width, maze.height
+        Gen.map2 (fun a b -> (a, b)) (Gen.choose (0, w-1)) (Gen.choose (0, h-1))
+
+    let genMazeSize = Gen.map MazeSize (Gen.two genSize)
+
+    let genMaze = gen {
+        let! MazeSize (w, h) = genMazeSize
+        let! bridges = Gen.listOf <| Gen.elements (Maze.edges w h)
+        return Maze (Maze.create w h bridges) }
+
+    let genFullyOpenMaze = gen {
+        let! MazeSize (w, h) = genMazeSize
+        return FullyOpenMaze (Maze.fullyOpen w h) }
+
+    let genFullyClosedMaze = gen {
+        let! MazeSize (w, h) = genMazeSize
+        return FullyClosedMaze (Maze.empty w h) }
+
+    let genOpenMazeWithPath = gen {
+        let! FullyOpenMaze m = genFullyOpenMaze
+        let! c1, c2 = Gen.two (genCell m)
+        return OpenMazeWithPath (m, c1, c2) }
+
+    let genClosedMazeWithPath = gen {
+        let! FullyClosedMaze m = genFullyClosedMaze
+        let! c1, c2 = Gen.two (genCell m)
+        return ClosedMazeWithPath (m , c1, c2) }
+
+    // Some boilerplate so we can use this in attributes.
+    type Arb =
+        static member MazeSize = Arb.fromGen genMazeSize
+        static member Maze = Arb.fromGen genMaze
+        static member FullyOpenMaze = Arb.fromGen genFullyOpenMaze
+        static member FullyClosedMaze = Arb.fromGen genFullyClosedMaze
+        static member OpenMazeWithPath = Arb.fromGen genOpenMazeWithPath
+        static member ClosedMazeWithPath = Arb.fromGen genClosedMazeWithPath
+
+
+let cellsAdjacent (x1, y1) (x2, y2) = abs (x1 - x2) + abs (y1 - y2) = 1
+
+let bridgeSymmetric maze c1 c2 = Maze.adj maze c2 |> Set.contains c1
 
 let adjListIsValid maze cell =
     let adj = Maze.adj maze cell
-    "adj cells unique"   @| (Set.count <| Set.ofList adj = List.length adj) .&.
-    "adj cells touching" @| (List.forall (Maze.cellsAdjacent cell) adj)
+    "adj cells touching" @| (Seq.forall (cellsAdjacent cell) adj) .&.
+    "bridge symmetric"   @| (Seq.forall (bridgeSymmetric maze cell) adj)
 
 let cellIsValid (maze:Maze.T) (x, y) =
     let w, h = maze.width, maze.height
@@ -52,51 +89,33 @@ let insideCells w h = seq {
     for x in 1..w-2 do for y in 1..h-2 do yield (x, y)}
 
 
-[<Property(Arbitrary=[|typeof<MazeGenerators>|])>]
-let testEmptyMaze (MazeSize (w, h)) =
-    let m = Maze.empty w h
-    let adjCount' n cell = (Maze.adj m cell |> List.length) = n
+[<Property(Arbitrary=[|typeof<MazeGen.Arb>|])>]
+let testFullyOpenMaze (FullyOpenMaze m) =
+    let adjCount' n cell = (Maze.adj m cell |> Seq.length) = n
     let adjCount n cells = Seq.forall (adjCount' n) cells
-    "empty maze has all cells connected to their neighbours" @| [
+    "a fully open maze has all cells connected to their neighbours" @| [
         "maze valid" @| (checkCellsValid m)
         "all adj cells present" @| [
-            "corner" @| (cornerCells w h |> adjCount 2)
-            "edge"   @| (edgeCells w h |> adjCount 3)
-            "inside" @| (insideCells w h |> adjCount 4)]]
+            "corner" @| (cornerCells m.width m.height |> adjCount 2)
+            "edge"   @| (edgeCells m.width m.height |> adjCount 3)
+            "inside" @| (insideCells m.width m.height |> adjCount 4)]]
 
 
-[<Property(Arbitrary=[|typeof<MazeGenerators>|])>]
-let testEmptyMazePath (MazeSizeWithTwoCells ((w, h), c1, c2)) =
-    Maze.checkPath (Maze.empty w h) c1 c2
+[<Property(Arbitrary=[|typeof<MazeGen.Arb>|])>]
+let testMaze (Maze m) =
+    let adjCount' n cell = (Maze.adj m cell |> Seq.length) = n
+    let adjCount n cells = Seq.forall (adjCount' n) cells
+    "a maze contains valid bidirectional bridges" @| [
+        "maze valid" @| (checkCellsValid m)]
 
 
-let assertPath w h c1 c2 walls result =
-    not result
+[<Property(Arbitrary=[|typeof<MazeGen.Arb>|])>]
+let testFullyOpenMazePath (OpenMazeWithPath (m, c1, c2)) =
+    "all paths are open in a fully open maze" @|
+    (Maze.checkPath m c1 c2)
 
 
-[<Test>]
-let testPathExamples001()  =
-    let maze = Maze.load 1 1 []
-    Assert.That(Maze.checkPath maze (0, 0) (0, 0))
-
-[<Test>]
-let testPathExamples002()  =
-    let maze = Maze.load 2 1 []
-    Assert.That(not (Maze.checkPath maze (0, 0) (1, 0)))
-
-[<Test>]
-let testPathExamples003()  =
-    let maze = Maze.load 2 1 [(0, 0), (1, 0)]
-    Assert.That(Maze.checkPath maze (0, 0) (1, 0))
-
-
-
-// [<TestCase(0,0, 0,0, Result=false, Description="border to itself")>]
-// [<TestCase(0,0, 0,1, Result=false, Description="border to border")>]
-// [<TestCase(0,1, 1,1, Result=false, Description="border to adjacent empty")>]
-// [<TestCase(1,1, 0,1, Result=false, Description="empty to adjacent border")>]
-// [<TestCase(1,1, 1,1, Result=true, Description="empty to itself")>]
-// [<TestCase(1,1, 2,1, Result=true, Description="empty to adjacent empty")>]
-// let testPathExamples x1 y1 x2 y2 =
-//     let maze = Maze.empty 2 1
-//     Maze.checkPath (x1, y1) (x2, y2) maze
+[<Property(Arbitrary=[|typeof<MazeGen.Arb>|])>]
+let testFullyClosedMazePath (ClosedMazeWithPath (m, c1, c2)) =
+    "only single-cell paths are open in a fully closed maze" @|
+    (Maze.checkPath m c1 c2 = (c1 = c2))
