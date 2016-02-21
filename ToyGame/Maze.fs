@@ -42,14 +42,16 @@ let addBridge maze (c1, c2) =
     { maze with adj = maze.adj |> addBridge' c1 c2 |> addBridge' c2 c1 }
 
 let getBridges maze =
-    let cellBridges bs (c, adj) = Set.fold collectEdge bs adj
+    let collectAdj c1 bs c2 = collectEdge bs (c1, c2)
+    let cellBridges bs (c, adj) = Set.fold (collectAdj c) bs adj
     Map.toSeq maze.adj |> Seq.fold cellBridges Set.empty
 
 let getWalls maze =
+    let collectAdj c1 bs c2 = collectEdge bs (c1, c2)
     let cellWalls ws (c, adj) =
         allowedBridges maze.width maze.height c
         |> Seq.filter (fun c2 -> not <| Set.contains c2 adj)
-        |> Seq.fold collectEdge ws
+        |> Seq.fold (collectAdj c) ws
     Map.toSeq maze.adj |> Seq.fold cellWalls Set.empty
 
 let create w h bridges =
@@ -69,12 +71,15 @@ let fullyOpen w h = create w h <| edges w h
 
 module PQ =
     let empty = Set.empty
-    let isEmpty = Set.isEmpty
-
     let singleton = Set.singleton
+
+    let isEmpty = Set.isEmpty
+    let count = Set.count
 
     let min pq = Set.minElement pq |> snd
     let max pq = Set.maxElement pq |> snd
+
+    let isIn pq item = Set.exists (fun (_, a) -> a = item) pq
 
     let rm item pq = Set.filter (fun (_, a) -> a <> item) pq
     let add (cost, item) pq = Set.add (cost, item) pq
@@ -95,3 +100,31 @@ let checkPath maze cell1 cell2 =
                     |> PQ.adds (adj maze cell |> notIn seen |> withdist)
                     |> checkPath' (Set.add cell seen)
     checkPath' Set.empty (PQ.singleton (dist cell1 cell2, cell1))
+
+
+module GrowingTree =
+
+    let rec grow addActive (rnd: System.Random) (maze: T) seen = function
+        | active when PQ.isEmpty active -> maze
+        | active ->
+            let cell = PQ.min active
+            let cs =
+                allowedBridges maze.width maze.height cell |> List.ofSeq
+                |> List.filter (fun c -> not <| Set.contains c seen)
+            match List.length cs with
+                | 0 -> grow addActive rnd maze seen (PQ.rm cell active)
+                | _ ->
+                    let cell2 = List.nth cs (rnd.Next(List.length cs))
+                    grow addActive rnd
+                        (addBridge maze (cell, cell2))
+                        (Set.add cell2 seen)
+                        (addActive cell2 active)
+
+    let gen w h =
+        let cf rnd active = - (PQ.count active)
+        let rnd = System.Random()
+        let addActive cell pq = PQ.add (cf rnd pq, cell) pq
+        grow addActive rnd
+            (empty w h)
+            (Set.singleton (0, 0))
+            (addActive (0, 0) PQ.empty)

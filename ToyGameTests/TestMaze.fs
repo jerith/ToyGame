@@ -9,8 +9,10 @@ type MazeSize = MazeSize of int*int
 type Maze = Maze of Maze.T
 type FullyOpenMaze = FullyOpenMaze of Maze.T
 type FullyClosedMaze = FullyClosedMaze of Maze.T
+type GTMaze = GTMaze of Maze.T
 type OpenMazeWithPath = OpenMazeWithPath of Maze.T*(int*int)*(int*int)
 type ClosedMazeWithPath = ClosedMazeWithPath of Maze.T*(int*int)*(int*int)
+type GTMazeWithPath = GTMazeWithPath of Maze.T*(int*int)*(int*int)
 
 
 module MazeGen =
@@ -38,6 +40,10 @@ module MazeGen =
         let! MazeSize (w, h) = genMazeSize
         return FullyClosedMaze (Maze.empty w h) }
 
+    let genGTMaze = gen {
+        let! MazeSize (w, h) = genMazeSize
+        return GTMaze (Maze.GrowingTree.gen w h) }
+
     let genOpenMazeWithPath = gen {
         let! FullyOpenMaze m = genFullyOpenMaze
         let! c1, c2 = Gen.two (genCell m)
@@ -48,14 +54,21 @@ module MazeGen =
         let! c1, c2 = Gen.two (genCell m)
         return ClosedMazeWithPath (m , c1, c2) }
 
+    let genGTMazeWithPath = gen {
+        let! GTMaze m = genGTMaze
+        let! c1, c2 = Gen.two (genCell m)
+        return GTMazeWithPath (m , c1, c2) }
+
     // Some boilerplate so we can use this in attributes.
     type Arb =
         static member MazeSize = Arb.fromGen genMazeSize
         static member Maze = Arb.fromGen genMaze
         static member FullyOpenMaze = Arb.fromGen genFullyOpenMaze
         static member FullyClosedMaze = Arb.fromGen genFullyClosedMaze
+        static member GTMaze = Arb.fromGen genGTMaze
         static member OpenMazeWithPath = Arb.fromGen genOpenMazeWithPath
         static member ClosedMazeWithPath = Arb.fromGen genClosedMazeWithPath
+        static member GTMazeWithPath = Arb.fromGen genGTMazeWithPath
 
 
 let cellsAdjacent (x1, y1) (x2, y2) = abs (x1 - x2) + abs (y1 - y2) = 1
@@ -103,8 +116,12 @@ let testFullyOpenMaze (FullyOpenMaze m) =
 
 [<Property(Arbitrary=[|typeof<MazeGen.Arb>|])>]
 let testMaze (Maze m) =
-    let adjCount' n cell = (Maze.adj m cell |> Seq.length) = n
-    let adjCount n cells = Seq.forall (adjCount' n) cells
+    "a maze contains valid bidirectional bridges" @| [
+        "maze valid" @| (checkCellsValid m)]
+
+
+[<Property(Arbitrary=[|typeof<MazeGen.Arb>|])>]
+let testGTMaze (GTMaze m) =
     "a maze contains valid bidirectional bridges" @| [
         "maze valid" @| (checkCellsValid m)]
 
@@ -119,3 +136,9 @@ let testFullyOpenMazePath (OpenMazeWithPath (m, c1, c2)) =
 let testFullyClosedMazePath (ClosedMazeWithPath (m, c1, c2)) =
     "only single-cell paths are open in a fully closed maze" @|
     (Maze.checkPath m c1 c2 = (c1 = c2))
+
+
+[<Property(Arbitrary=[|typeof<MazeGen.Arb>|])>]
+let testGrownTreeMazePath (GTMazeWithPath (m, c1, c2)) =
+    "all paths are open in a maze generated with the growing tree algorithm" @|
+    (Maze.checkPath m c1 c2)
