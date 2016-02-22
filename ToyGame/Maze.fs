@@ -124,7 +124,8 @@ module GrowingTree =
         let cf rnd active = - (PQ.count active)
         let rnd = System.Random()
         let addActive cell pq = PQ.add (cf rnd pq, cell) pq
+        let startCell = (rnd.Next(w), rnd.Next(h))
         grow addActive rnd
             (empty w h)
-            (Set.singleton (0, 0))
-            (addActive (0, 0) PQ.empty)
+            (Set.singleton startCell)
+            (addActive startCell PQ.empty)
