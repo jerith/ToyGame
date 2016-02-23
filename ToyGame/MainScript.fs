@@ -79,9 +79,12 @@ module UIUtil =
     res.inputField <- _gbers "UI/Skin/InputFieldBackground.psd"
     res.knob <- _gbers "UI/Skin/Knob.psd"
 
-    let mkButton text handler =
+    let mkButton (parent: GameObject) text handler =
         let button = UI.DefaultControls.CreateButton(res)
         button.name <- sprintf "Button: %s" text
+        button.transform.SetParent(parent.transform, false)
+        let layout = button.AddComponent<UI.LayoutElement>()
+        layout.preferredHeight <- 30.0f
         (button.GetComponent<UI.Button>()).onClick.AddListener(
             new Events.UnityAction(handler))
         let btext = button.GetComponentInChildren<UI.Text>()
@@ -89,9 +92,12 @@ module UIUtil =
         btext.text <- text
         button
 
-    let mkSlider text min max value handler =
+    let mkSlider (parent: GameObject) text min max value handler =
         let slider = UI.DefaultControls.CreateSlider(res)
         slider.name <- sprintf "Slider: %s" text
+        slider.transform.SetParent(parent.transform, false)
+        let layout = slider.AddComponent<UI.LayoutElement>()
+        layout.preferredHeight <- 20.0f
         let sslider = slider.GetComponent<UI.Slider>()
         sslider.wholeNumbers <- true
         sslider.minValue <- float32 min
@@ -107,35 +113,24 @@ module UIUtil =
         let rect = panel.AddComponent<RectTransform>()
         rect.anchorMin <- new Vector2(0.0f, 0.0f)
         rect.anchorMax <- new Vector2(0.0f, 1.0f)
-        rect.sizeDelta <- new Vector2(70.0f, 1.0f)
+        rect.sizeDelta <- new Vector2(100.0f, 1.0f)
         rect.anchoredPosition <- new Vector2(rect.sizeDelta.x / 2.0f, 0.0f)
         panel
-
-    let rec addToPanel (panel: GameObject) yoffset = function
-        | [] -> ()
-        | (widget: GameObject) :: widgets ->
-            widget.transform.SetParent(panel.transform, false)
-            let rect = widget.GetComponent<RectTransform>()
-            rect.anchorMin <- new Vector2(0.0f, 1.0f)
-            rect.anchorMax <- new Vector2(1.0f, 1.0f)
-            rect.sizeDelta <- new Vector2(0.0f, rect.sizeDelta.y)
-            rect.anchoredPosition <- new Vector2(
-                0.0f, -rect.sizeDelta.y / 2.0f - yoffset)
-            addToPanel panel (yoffset + rect.sizeDelta.y + 5.0f) widgets
 
 
     let buildUI (main: IMainScript) =
         let canvas = (GameObject.FindObjectOfType<Canvas>()).gameObject
         let panel = addPanel canvas
+        let vlayout = panel.AddComponent<UI.VerticalLayoutGroup>()
+        vlayout.childForceExpandHeight <- false
+        vlayout.spacing <- 5.0f
 
-        let bGenerate = mkButton "generate" main.genMaze
-        let bClear = mkButton "clear" main.clearMaze
-        let sWidth =
-            mkSlider "width" 2 30 (main.getWidth()) (int >> main.setWidth)
-        let sHeight =
-            mkSlider "height" 2 30 (main.getHeight()) (int >> main.setHeight)
-
-        addToPanel panel 0.0f [bGenerate; bClear; sWidth; sHeight]
+        let bGenerate = mkButton panel "generate" main.genMaze
+        let bClear = mkButton panel "clear" main.clearMaze
+        let sWidth = mkSlider panel "width" 2 30 (main.getWidth())
+                         (int >> main.setWidth)
+        let sHeight = mkSlider panel "height" 2 30 (main.getHeight())
+                          (int >> main.setHeight)
 
         canvas
 
