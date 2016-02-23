@@ -6,6 +6,10 @@ open UnityEngine
 type IMainScript =
     abstract genMaze: unit -> unit
     abstract clearMaze: unit -> unit
+    abstract getWidth: unit -> int
+    abstract setWidth: int -> unit
+    abstract getHeight: unit -> int
+    abstract setHeight: int -> unit
 
 
 module MazeUtil =
@@ -68,30 +72,34 @@ module MazeUtil =
 
 module UIUtil =
 
-    let addButton (parent: GameObject) text yoffset handler =
-        let button = new GameObject(sprintf "Button: %s" text)
-        button.transform.SetParent(parent.transform, false)
-        let brect = button.AddComponent<RectTransform>()
-        brect.anchorMin <- new Vector2(0.0f, 1.0f)
-        brect.anchorMax <- new Vector2(1.0f, 1.0f)
-        brect.sizeDelta <- new Vector2(0.0f, 30.0f)
-        brect.anchoredPosition <- new Vector2(
-            0.0f, -brect.sizeDelta.y / 2.0f - yoffset)
-        let bb = button.AddComponent<UI.Button>()
-        bb.onClick.AddListener(new Events.UnityAction(handler))
-        button.AddComponent<UI.Image>() |> ignore
-        let btext = new GameObject("Text")
-        btext.transform.SetParent(button.transform, false)
-        let btt = btext.AddComponent<UI.Text>()
-        btt.text <- text
-        btt.font <- Font.CreateDynamicFontFromOSFont([|"Arial"|], 14)
-        btt.color <- Color.black
-        btt.alignment <- TextAnchor.MiddleCenter
-        let trect = btext.GetComponent<RectTransform>()
-        trect.anchorMin <- new Vector2(0.0f, 0.0f)
-        trect.anchorMax <- new Vector2(1.0f, 1.0f)
-        trect.sizeDelta <- new Vector2(0.0f, 0.0f)
+    let mutable res = new UI.DefaultControls.Resources()
+    let _gbers s = UnityEditor.AssetDatabase.GetBuiltinExtraResource<Sprite>(s)
+    res.standard <- _gbers "UI/Skin/UISprite.psd"
+    res.background <- _gbers "UI/Skin/Background.psd"
+    res.inputField <- _gbers "UI/Skin/InputFieldBackground.psd"
+    res.knob <- _gbers "UI/Skin/Knob.psd"
+
+    let mkButton text handler =
+        let button = UI.DefaultControls.CreateButton(res)
+        button.name <- sprintf "Button: %s" text
+        (button.GetComponent<UI.Button>()).onClick.AddListener(
+            new Events.UnityAction(handler))
+        let btext = button.GetComponentInChildren<UI.Text>()
+        btext.font <- Font.CreateDynamicFontFromOSFont([|"Arial"|], 14)
+        btext.text <- text
         button
+
+    let mkSlider text min max value handler =
+        let slider = UI.DefaultControls.CreateSlider(res)
+        slider.name <- sprintf "Slider: %s" text
+        let sslider = slider.GetComponent<UI.Slider>()
+        sslider.wholeNumbers <- true
+        sslider.minValue <- float32 min
+        sslider.maxValue <- float32 max
+        sslider.value <- float32 value
+        sslider.onValueChanged.AddListener(
+            new Events.UnityAction<float32>(handler))
+        slider
 
     let addPanel (parent: GameObject) =
         let panel = new GameObject("Panel")
@@ -103,20 +111,31 @@ module UIUtil =
         rect.anchoredPosition <- new Vector2(rect.sizeDelta.x / 2.0f, 0.0f)
         panel
 
+    let rec addToPanel (panel: GameObject) yoffset = function
+        | [] -> ()
+        | (widget: GameObject) :: widgets ->
+            widget.transform.SetParent(panel.transform, false)
+            let rect = widget.GetComponent<RectTransform>()
+            rect.anchorMin <- new Vector2(0.0f, 1.0f)
+            rect.anchorMax <- new Vector2(1.0f, 1.0f)
+            rect.sizeDelta <- new Vector2(0.0f, rect.sizeDelta.y)
+            rect.anchoredPosition <- new Vector2(
+                0.0f, -rect.sizeDelta.y / 2.0f - yoffset)
+            addToPanel panel (yoffset + rect.sizeDelta.y + 5.0f) widgets
+
 
     let buildUI (main: IMainScript) =
         let canvas = (GameObject.FindObjectOfType<Canvas>()).gameObject
         let panel = addPanel canvas
 
-        let hGenerate () =
-            Debug.Log("generate!")
-            main.genMaze ()
-        let bGenerate = addButton panel "generate" 0.0f hGenerate
+        let bGenerate = mkButton "generate" main.genMaze
+        let bClear = mkButton "clear" main.clearMaze
+        let sWidth =
+            mkSlider "width" 2 30 (main.getWidth()) (int >> main.setWidth)
+        let sHeight =
+            mkSlider "height" 2 30 (main.getHeight()) (int >> main.setHeight)
 
-        let hClear () =
-            Debug.Log("clear!")
-            main.clearMaze ()
-        let bClear = addButton panel "clear" 35.0f hClear
+        addToPanel panel 0.0f [bGenerate; bClear; sWidth; sHeight]
 
         canvas
 
@@ -154,6 +173,11 @@ type MainScript() =
                 | Some (GameMaze (m, go)) ->
                     GameObject.Destroy(go)
                     maze <- None
+
+        member this.getWidth () = mazeWidth
+        member this.setWidth w = mazeWidth <- w
+        member this.getHeight () = mazeHeight
+        member this.setHeight h = mazeHeight <- h
 
     member this.Start() =
         let canvas = UIUtil.buildUI this
