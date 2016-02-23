@@ -90,9 +90,28 @@ module UIUtil =
         let btext = button.GetComponentInChildren<UI.Text>()
         btext.font <- Font.CreateDynamicFontFromOSFont([|"Arial"|], 14)
         btext.text <- text
-        button
+
+    let mkSliderLabel (parent: GameObject) text value =
+        let label = new GameObject(sprintf "Slider label: %s" text)
+        label.transform.SetParent(parent.transform)
+        let hlayout = label.AddComponent<UI.HorizontalLayoutGroup>()
+        hlayout.childForceExpandHeight <- false
+        let labelName = new GameObject(sprintf "Slider name: %s" text)
+        labelName.transform.SetParent(label.transform)
+        let textName = labelName.AddComponent<UI.Text>()
+        textName.alignment <- TextAnchor.MiddleLeft
+        textName.font <- Font.CreateDynamicFontFromOSFont([|"Arial"|], 14)
+        textName.text <- text
+        let labelValue = new GameObject(sprintf "Slider value: %s" text)
+        labelValue.transform.SetParent(label.transform)
+        let textValue = labelValue.AddComponent<UI.Text>()
+        textValue.alignment <- TextAnchor.MiddleRight
+        textValue.font <- Font.CreateDynamicFontFromOSFont([|"Arial"|], 14)
+        textValue.text <- string value
+        fun value -> textValue.text <- string value; value
 
     let mkSlider (parent: GameObject) text min max value handler =
+        let updateLabel = mkSliderLabel parent text value
         let slider = UI.DefaultControls.CreateSlider(res)
         slider.name <- sprintf "Slider: %s" text
         slider.transform.SetParent(parent.transform, false)
@@ -104,8 +123,7 @@ module UIUtil =
         sslider.maxValue <- float32 max
         sslider.value <- float32 value
         sslider.onValueChanged.AddListener(
-            new Events.UnityAction<float32>(handler))
-        slider
+            new Events.UnityAction<float32>(updateLabel >> handler))
 
     let addPanel (parent: GameObject) =
         let panel = new GameObject("Panel")
@@ -117,20 +135,17 @@ module UIUtil =
         rect.anchoredPosition <- new Vector2(rect.sizeDelta.x / 2.0f, 0.0f)
         panel
 
-
-    let buildUI (main: IMainScript) =
+    let buildUI (ms: IMainScript) =
         let canvas = (GameObject.FindObjectOfType<Canvas>()).gameObject
         let panel = addPanel canvas
         let vlayout = panel.AddComponent<UI.VerticalLayoutGroup>()
         vlayout.childForceExpandHeight <- false
         vlayout.spacing <- 5.0f
 
-        let bGenerate = mkButton panel "generate" main.genMaze
-        let bClear = mkButton panel "clear" main.clearMaze
-        let sWidth = mkSlider panel "width" 2 30 (main.getWidth())
-                         (int >> main.setWidth)
-        let sHeight = mkSlider panel "height" 2 30 (main.getHeight())
-                          (int >> main.setHeight)
+        mkButton panel "generate" ms.genMaze
+        mkButton panel "clear" ms.clearMaze
+        mkSlider panel "width" 2 30 (ms.getWidth()) (int >> ms.setWidth)
+        mkSlider panel "height" 2 30 (ms.getHeight()) (int >> ms.setHeight)
 
         canvas
 
