@@ -46,10 +46,6 @@
       <HintPath>..\..\..\..\..\..\..\Applications\Unity\Unity.app\Contents\UnityExtensions\Unity\GUISystem\UnityEngine.UI.dll</HintPath>
       <Private>False</Private>
     </Reference>
-    <Reference Include="UnityEditor">
-      <HintPath>..\..\..\..\..\..\..\Applications\Unity\Unity.app\Contents\Frameworks\Managed\UnityEditor.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />

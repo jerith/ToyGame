@@ -4,8 +4,8 @@ open UnityEngine
 
 
 type IMainScript =
-    abstract genMaze: unit -> unit
-    abstract clearMaze: unit -> unit
+    abstract GenMaze: unit -> unit
+    abstract ClearMaze: unit -> unit
     abstract getWidth: unit -> int
     abstract setWidth: int -> unit
     abstract getHeight: unit -> int
@@ -19,12 +19,56 @@ module MazeUtil =
         go : GameObject
     }
 
+    let mutable mazeMaterial: Material option = None
+    let mutable startMaterial: Material option = None
+    let mutable endMaterial: Material option = None
+
+    let mkMaterial () =
+        let go = GameObject.CreatePrimitive(PrimitiveType.Cube)
+        let mat = go.GetComponent<Renderer>().material
+        mat.shader <- Shader.Find("Unlit/MazeShader")
+        GameObject.Destroy(go)
+        mat
+
+    let setMazeMaterial (go: GameObject) =
+        let mat =
+            match mazeMaterial with
+                | Some mat -> mat
+                | None ->
+                    let mat = mkMaterial ()
+                    mazeMaterial <- Some mat
+                    mat
+        go.GetComponent<Renderer>().material <- mat
+
+    let setStartMaterial (go: GameObject) =
+        let mat =
+            match startMaterial with
+                | Some mat -> mat
+                | None ->
+                    let mat = mkMaterial ()
+                    mat.color <- Color.red
+                    startMaterial <- Some mat
+                    mat
+        go.GetComponent<Renderer>().material <- mat
+
+    let setEndMaterial (go: GameObject) =
+        let mat =
+            match endMaterial with
+                | Some mat -> mat
+                | None ->
+                    let mat = mkMaterial ()
+                    mat.color <- Color.blue
+                    endMaterial <- Some mat
+                    mat
+        go.GetComponent<Renderer>().material <- mat
+
     let V3 (x, y) z = new Vector3(float32 x, float32 y, float32 z)
 
     let spawnCube p pos =
         let cube = GameObject.CreatePrimitive(PrimitiveType.Cube)
         cube.transform.SetParent(p.go.transform, false)
         cube.transform.localPosition <- (V3 pos 0)
+        setMazeMaterial cube
         cube
 
     let pos p (x, y) = (x * (1.0 + p.gap), y * (1.0 + p.gap))
@@ -35,10 +79,8 @@ module MazeUtil =
     let spawnCell p (x, y) =
         let cube = spawnCube p (pos p (float x, float y))
         cube.name <- sprintf "Cell (%d, %d)" x y
-        if (x, y) = (0, 0) then
-            cube.GetComponent<Renderer>().material.color <- Color.red
-        if (x, y) = (p.maze.width-1, p.maze.height-1) then
-            cube.GetComponent<Renderer>().material.color <- Color.blue
+        if (x, y) = (0, 0) then setStartMaterial cube
+        if (x, y) = (p.maze.width-1, p.maze.height-1) then setEndMaterial cube
 
     let spawnBridge p ((x1, y1), (x2, y2) as bridge) =
         let size = match x1 = x2, y1 = y2 with
@@ -47,24 +89,25 @@ module MazeUtil =
                    | _ -> failwith "Bad bridge."
         let cube = spawnCube p (bridgePos p bridge)
         cube.name <- sprintf "Bridge (%d, %d) <-> (%d, %d)" x1 y1 x2 y2
-        cube.transform.localScale <- (V3 size 1)
+        cube.transform.localScale <- V3 size 1
 
-    let transformMaze p =
+    let transformMaze p uiWidth =
         let w = float p.maze.width * (p.gap + 1.0) - p.gap
         let h = float p.maze.height * (p.gap + 1.0) - p.gap
         let c = Array.get Camera.allCameras 0 // Assume we only have one.
         let csize = float c.orthographicSize * 0.95
-        let scalex = csize * 2.0 * (float c.aspect) / w
+        let scalex = (csize * 2.0 * (float c.aspect) - uiWidth) / w
         let scaley = csize * 2.0 / h
         let scale = min scalex scaley
-        p.go.transform.localScale <- (V3 (scale, scale) 1)
+        p.go.transform.localScale <- V3 (scale, scale) 1
 
         let offset l = -(l - 1.0) * scale / 2.0
-        p.go.transform.localPosition <- (V3 (offset w, offset h) 0)
+        p.go.transform.localPosition <-
+            V3 (offset w + (uiWidth / 2.0), offset h) 0
 
-    let spawnMaze (maze: Maze.T) gap =
+    let spawnMaze (maze: Maze.T) gap uiWidth =
         let p = { maze = maze; gap = gap; go = new GameObject("maze") }
-        transformMaze p
+        transformMaze p uiWidth
         Maze.cells maze.width maze.height |> Seq.iter (spawnCell p)
         Maze.getBridges maze |> Seq.iter (spawnBridge p)
         p.go
@@ -73,11 +116,6 @@ module MazeUtil =
 module UIUtil =
 
     let mutable res = new UI.DefaultControls.Resources()
-    let _gbers s = UnityEditor.AssetDatabase.GetBuiltinExtraResource<Sprite>(s)
-    res.standard <- _gbers "UI/Skin/UISprite.psd"
-    res.background <- _gbers "UI/Skin/Background.psd"
-    res.inputField <- _gbers "UI/Skin/InputFieldBackground.psd"
-    res.knob <- _gbers "UI/Skin/Knob.psd"
 
     let mkButton (parent: GameObject) text handler =
         let button = UI.DefaultControls.CreateButton(res)
@@ -133,17 +171,17 @@ module UIUtil =
         rect.anchorMax <- new Vector2(0.0f, 1.0f)
         rect.sizeDelta <- new Vector2(100.0f, 1.0f)
         rect.anchoredPosition <- new Vector2(rect.sizeDelta.x / 2.0f, 0.0f)
+        let vlayout = panel.AddComponent<UI.VerticalLayoutGroup>()
+        vlayout.childForceExpandHeight <- false
+        vlayout.spacing <- 5.0f
+        vlayout.padding <- new RectOffset(5, 5, 5, 5)
         panel
 
     let buildUI (ms: IMainScript) =
         let canvas = (GameObject.FindObjectOfType<Canvas>()).gameObject
         let panel = addPanel canvas
-        let vlayout = panel.AddComponent<UI.VerticalLayoutGroup>()
-        vlayout.childForceExpandHeight <- false
-        vlayout.spacing <- 5.0f
 
-        mkButton panel "generate" ms.genMaze
-        mkButton panel "clear" ms.clearMaze
+        mkButton panel "regenerate" (ms.ClearMaze >> ms.GenMaze)
         mkSlider panel "width" 2 30 (ms.getWidth()) (int >> ms.setWidth)
         mkSlider panel "height" 2 30 (ms.getHeight()) (int >> ms.setHeight)
 
@@ -169,15 +207,15 @@ type MainScript() =
     let mutable maze: GameMaze option = None
 
     interface IMainScript with
-        member this.genMaze () =
+        member this.GenMaze () =
             match maze with
                 | Some _ -> Debug.Log("Maze already exists!")
                 | None ->
                     let m = Maze.GrowingTree.gen mazeWidth mazeHeight
-                    let go = MazeUtil.spawnMaze m gap
+                    let go = MazeUtil.spawnMaze m gap 100.0
                     maze <- Some (GameMaze (m, go))
 
-        member this.clearMaze () =
+        member this.ClearMaze () =
             match maze with
                 | None -> ()
                 | Some (GameMaze (m, go)) ->
@@ -192,4 +230,6 @@ type MainScript() =
     member this.Start() =
         let canvas = UIUtil.buildUI this
         let cam = Array.get Camera.allCameras 0 // Assume we only have one.
-        cam.orthographicSize <- 240.0f
+        let crt = canvas.GetComponent<RectTransform>()
+        cam.orthographicSize <- crt.rect.height / 2.0f
+        (this :> IMainScript).GenMaze ()
