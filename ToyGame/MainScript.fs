@@ -2,6 +2,14 @@
 
 open UnityEngine
 
+module P = Primitives
+
+
+type GameMaze = GameMaze of Maze.T*GameObject
+type GamePlayer = {
+    mutable pos: int*int
+    go: GameObject
+}
 
 type IMainScript =
     abstract GenMaze: unit -> unit
@@ -19,56 +27,15 @@ module MazeUtil =
         go : GameObject
     }
 
-    let mutable mazeMaterial: Material option = None
-    let mutable startMaterial: Material option = None
-    let mutable endMaterial: Material option = None
-
-    let mkMaterial () =
-        let go = GameObject.CreatePrimitive(PrimitiveType.Cube)
-        let mat = go.GetComponent<Renderer>().material
-        mat.shader <- Shader.Find("Unlit/MazeShader")
-        GameObject.Destroy(go)
-        mat
-
-    let setMazeMaterial (go: GameObject) =
-        let mat =
-            match mazeMaterial with
-                | Some mat -> mat
-                | None ->
-                    let mat = mkMaterial ()
-                    mazeMaterial <- Some mat
-                    mat
-        go.GetComponent<Renderer>().material <- mat
-
-    let setStartMaterial (go: GameObject) =
-        let mat =
-            match startMaterial with
-                | Some mat -> mat
-                | None ->
-                    let mat = mkMaterial ()
-                    mat.color <- Color.red
-                    startMaterial <- Some mat
-                    mat
-        go.GetComponent<Renderer>().material <- mat
-
-    let setEndMaterial (go: GameObject) =
-        let mat =
-            match endMaterial with
-                | Some mat -> mat
-                | None ->
-                    let mat = mkMaterial ()
-                    mat.color <- Color.blue
-                    endMaterial <- Some mat
-                    mat
-        go.GetComponent<Renderer>().material <- mat
-
-    let V3 (x, y) z = new Vector3(float32 x, float32 y, float32 z)
+    let mazeColor = Color.white
+    let startColor = (Color.red / 2.0f) + (Color.white / 2.0f)
+    let endColor = (Color.blue / 2.0f) + (Color.white / 2.0f)
 
     let spawnCube p pos =
         let cube = GameObject.CreatePrimitive(PrimitiveType.Cube)
         cube.transform.SetParent(p.go.transform, false)
-        cube.transform.localPosition <- (V3 pos 0)
-        setMazeMaterial cube
+        cube.transform.localPosition <- (P.V3 pos 0)
+        P.setMaterial cube mazeColor
         cube
 
     let pos p (x, y) = (x * (1.0 + p.gap), y * (1.0 + p.gap))
@@ -79,8 +46,9 @@ module MazeUtil =
     let spawnCell p (x, y) =
         let cube = spawnCube p (pos p (float x, float y))
         cube.name <- sprintf "Cell (%d, %d)" x y
-        if (x, y) = (0, 0) then setStartMaterial cube
-        if (x, y) = (p.maze.width-1, p.maze.height-1) then setEndMaterial cube
+        if (x, y) = (0, 0) then P.setMaterial cube startColor
+        if (x, y) = (p.maze.width-1, p.maze.height-1) then
+            P.setMaterial cube endColor
 
     let spawnBridge p ((x1, y1), (x2, y2) as bridge) =
         let size = match x1 = x2, y1 = y2 with
@@ -89,7 +57,7 @@ module MazeUtil =
                    | _ -> failwith "Bad bridge."
         let cube = spawnCube p (bridgePos p bridge)
         cube.name <- sprintf "Bridge (%d, %d) <-> (%d, %d)" x1 y1 x2 y2
-        cube.transform.localScale <- V3 size 1
+        cube.transform.localScale <- P.V3 size 1
 
     let transformMaze p uiWidth =
         let w = float p.maze.width * (p.gap + 1.0) - p.gap
@@ -99,11 +67,11 @@ module MazeUtil =
         let scalex = (csize * 2.0 * (float c.aspect) - uiWidth) / w
         let scaley = csize * 2.0 / h
         let scale = min scalex scaley
-        p.go.transform.localScale <- V3 (scale, scale) 1
+        p.go.transform.localScale <- P.V3 (scale, scale) 1
 
         let offset l = -(l - 1.0) * scale / 2.0
         p.go.transform.localPosition <-
-            V3 (offset w + (uiWidth / 2.0), offset h) 0
+            P.V3 (offset w + (uiWidth / 2.0), offset h) 0
 
     let spawnMaze (maze: Maze.T) gap uiWidth =
         let p = { maze = maze; gap = gap; go = new GameObject("maze") }
@@ -111,6 +79,32 @@ module MazeUtil =
         Maze.cells maze.width maze.height |> Seq.iter (spawnCell p)
         Maze.getBridges maze |> Seq.iter (spawnBridge p)
         p.go
+
+
+module Player =
+    let playerColor = Color.green / 2.0f
+
+    let move (mp: MazeUtil.Params) pl dir =
+        let x, y = pl.pos
+        let coords (x, y) = float x * (1.0 + mp.gap), float y * (1.0 + mp.gap)
+        let move' dx dy =
+            pl.pos <- (x + dx, y + dy)
+            pl.go.transform.localPosition <- P.V3 (coords pl.pos) -1
+        match dir with
+            | "up" -> move' 0 1
+            | "down" -> move' 0 -1
+            | "left" -> move' -1 0
+            | "right" -> move' 1 0
+            | _ -> failwith <| "Bad direction: " + dir
+
+    let spawnPlayer (maze: GameObject) =
+        let pl = GameObject.CreatePrimitive(PrimitiveType.Sphere)
+        pl.name <- "Player"
+        P.setMaterial pl playerColor
+        pl.transform.SetParent(maze.transform, false)
+        pl.transform.localScale <- new Vector3(0.9f, 0.9f, 0.9f)
+        pl.transform.localPosition <- new Vector3(0.0f, 0.0f, -1.0f)
+        pl
 
 
 module UIUtil =
@@ -188,8 +182,6 @@ module UIUtil =
         canvas
 
 
-type GameMaze = GameMaze of Maze.T*GameObject
-
 
 type MainScript() =
     inherit MonoBehaviour()
@@ -205,6 +197,7 @@ type MainScript() =
     let mutable gap = 0.1
 
     let mutable maze: GameMaze option = None
+    let mutable player: GamePlayer option = None
 
     interface IMainScript with
         member this.GenMaze () =
@@ -214,6 +207,7 @@ type MainScript() =
                     let m = Maze.GrowingTree.gen mazeWidth mazeHeight
                     let go = MazeUtil.spawnMaze m gap 100.0
                     maze <- Some (GameMaze (m, go))
+                    player <- Some {pos=(0, 0); go=(Player.spawnPlayer go)}
 
         member this.ClearMaze () =
             match maze with
@@ -233,3 +227,12 @@ type MainScript() =
         let crt = canvas.GetComponent<RectTransform>()
         cam.orthographicSize <- crt.rect.height / 2.0f
         (this :> IMainScript).GenMaze ()
+
+    member this.Update() =
+        let move mp pl (dir: string) =
+            if Input.GetKeyDown(dir) then Player.move mp pl dir
+        match maze, player with
+            | Some (GameMaze (m, go)), Some pl ->
+                let mp = {MazeUtil.maze=m; MazeUtil.gap=gap; MazeUtil.go=go}
+                List.iter (move mp pl) ["up"; "down"; "left"; "right"]
+            | _, _ -> ()
