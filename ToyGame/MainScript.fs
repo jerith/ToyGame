@@ -109,54 +109,6 @@ module Player =
 
 module UIUtil =
 
-    let mutable res = new UI.DefaultControls.Resources()
-
-    let mkButton (parent: GameObject) text handler =
-        let button = UI.DefaultControls.CreateButton(res)
-        button.name <- sprintf "Button: %s" text
-        button.transform.SetParent(parent.transform, false)
-        let layout = button.AddComponent<UI.LayoutElement>()
-        layout.preferredHeight <- 30.0f
-        (button.GetComponent<UI.Button>()).onClick.AddListener(
-            new Events.UnityAction(handler))
-        let btext = button.GetComponentInChildren<UI.Text>()
-        btext.font <- Font.CreateDynamicFontFromOSFont([|"Arial"|], 14)
-        btext.text <- text
-
-    let mkSliderLabel (parent: GameObject) text value =
-        let label = new GameObject(sprintf "Slider label: %s" text)
-        label.transform.SetParent(parent.transform)
-        let hlayout = label.AddComponent<UI.HorizontalLayoutGroup>()
-        hlayout.childForceExpandHeight <- false
-        let labelName = new GameObject(sprintf "Slider name: %s" text)
-        labelName.transform.SetParent(label.transform)
-        let textName = labelName.AddComponent<UI.Text>()
-        textName.alignment <- TextAnchor.MiddleLeft
-        textName.font <- Font.CreateDynamicFontFromOSFont([|"Arial"|], 14)
-        textName.text <- text
-        let labelValue = new GameObject(sprintf "Slider value: %s" text)
-        labelValue.transform.SetParent(label.transform)
-        let textValue = labelValue.AddComponent<UI.Text>()
-        textValue.alignment <- TextAnchor.MiddleRight
-        textValue.font <- Font.CreateDynamicFontFromOSFont([|"Arial"|], 14)
-        textValue.text <- string value
-        fun value -> textValue.text <- string value; value
-
-    let mkSlider (parent: GameObject) text min max value handler =
-        let updateLabel = mkSliderLabel parent text value
-        let slider = UI.DefaultControls.CreateSlider(res)
-        slider.name <- sprintf "Slider: %s" text
-        slider.transform.SetParent(parent.transform, false)
-        let layout = slider.AddComponent<UI.LayoutElement>()
-        layout.preferredHeight <- 20.0f
-        let sslider = slider.GetComponent<UI.Slider>()
-        sslider.wholeNumbers <- true
-        sslider.minValue <- float32 min
-        sslider.maxValue <- float32 max
-        sslider.value <- float32 value
-        sslider.onValueChanged.AddListener(
-            new Events.UnityAction<float32>(updateLabel >> handler))
-
     let addPanel (parent: GameObject) =
         let panel = new GameObject("Panel")
         panel.transform.SetParent(parent.transform, false)
@@ -173,14 +125,13 @@ module UIUtil =
 
     let buildUI (ms: IMainScript) =
         let canvas = (GameObject.FindObjectOfType<Canvas>()).gameObject
-        let panel = addPanel canvas
+        let pan = addPanel canvas
 
-        mkButton panel "regenerate" (ms.ClearMaze >> ms.GenMaze)
-        mkSlider panel "width" 2 30 (ms.getWidth()) (int >> ms.setWidth)
-        mkSlider panel "height" 2 30 (ms.getHeight()) (int >> ms.setHeight)
+        P.UI.mkButton pan "regenerate" (ms.ClearMaze >> ms.GenMaze)
+        P.UI.mkSlider pan "width" 2 30 (ms.getWidth()) (int >> ms.setWidth)
+        P.UI.mkSlider pan "height" 2 30 (ms.getHeight()) (int >> ms.setHeight)
 
         canvas
-
 
 
 type MainScript() =
@@ -226,7 +177,7 @@ type MainScript() =
         let cam = Array.get Camera.allCameras 0 // Assume we only have one.
         let crt = canvas.GetComponent<RectTransform>()
         cam.orthographicSize <- crt.rect.height / 2.0f
-        (this :> IMainScript).GenMaze ()
+        (this :> IMainScript).GenMaze()
 
     member this.Update() =
         let move mp pl (dir: string) =
