@@ -84,18 +84,20 @@ module MazeUtil =
 module Player =
     let playerColor = Color.green / 2.0f
 
+    let canMove maze pos dst = Set.contains dst (Maze.adj maze pos)
+
     let move (mp: MazeUtil.Params) pl dir =
         let x, y = pl.pos
         let coords (x, y) = float x * (1.0 + mp.gap), float y * (1.0 + mp.gap)
-        let move' dx dy =
-            pl.pos <- (x + dx, y + dy)
-            pl.go.transform.localPosition <- P.V3 (coords pl.pos) -1
-        match dir with
-            | "up" -> move' 0 1
-            | "down" -> move' 0 -1
-            | "left" -> move' -1 0
-            | "right" -> move' 1 0
-            | _ -> failwith <| "Bad direction: " + dir
+        let dst = match dir with
+                      | "up" -> (x, y + 1)
+                      | "down" -> (x, y - 1)
+                      | "left" -> (x - 1, y)
+                      | "right" -> (x + 1, y)
+                      | _ -> failwith <| "Bad direction: " + dir
+        if canMove mp.maze pl.pos dst then
+            pl.pos <- dst
+            pl.go.transform.localPosition <- P.V3 (coords dst) -1
 
     let spawnPlayer (maze: GameObject) =
         let pl = GameObject.CreatePrimitive(PrimitiveType.Sphere)
