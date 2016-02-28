@@ -24,3 +24,7 @@ ExportedObj/
 
 # Unity3D Generated File On Crash Reports
 sysinfo.txt
+
+# Assemblies we generate or copy in
+/Assets/FSharp.Core.dll*
+/Assets/ToyGame.dll*
